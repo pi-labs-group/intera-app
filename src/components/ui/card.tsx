@@ -1,10 +1,11 @@
 import Link from "next/link";
 
-export type CardTone = "default" | "brand";
+export type CardTone = "default" | "brand" | "danger";
 
 const TONE_CLASSES: Record<CardTone, string> = {
   default: "border-neutral-100 bg-surface",
   brand: "border-primary-border bg-surface",
+  danger: "border-danger-border bg-surface",
 };
 
 type CardProps = {
@@ -13,7 +14,8 @@ type CardProps = {
   className?: string;
   /**
    * Fundo e borda. `brand` (fundo `surface`, borda `primary-border`) é o modelo
-   * uniforme dos cards de atividade.
+   * uniforme dos cards de atividade; `danger` (borda `danger-border`) marca
+   * conteúdo urgente.
    */
   tone?: CardTone;
   /** Quando presente, o card inteiro vira um link de navegação. */
