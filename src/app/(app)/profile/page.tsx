@@ -1,8 +1,12 @@
+import Image from "next/image";
+
 // TODO (fase E): substituir por dados reais
 const STUDENT = {
   name: "Lucas Andrade",
   className: "9º A",
   enrollmentId: "20230045",
+  photoUrl:
+    "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=300",
 };
 
 // TODO (fase E): substituir por dados reais
@@ -18,14 +22,6 @@ const PEDAGOGICAL_SUPPORT = {
   summary:
     "Plano Individual de Acompanhamento (PIA) ativo com foco em rotina de estudos. Próximo encontro: 12/04.",
 };
-
-/** Iniciais do primeiro e do último nome (ex.: "Lucas Andrade" → "LA"). */
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const first = parts[0]?.[0] ?? "";
-  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
-  return (first + last).toUpperCase();
-}
 
 /** Bloco rotulado com um card branco interno; a cor do bloco indica o tipo de informação. */
 function InfoSection({
@@ -53,12 +49,13 @@ export default function ProfilePage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col items-center gap-2 text-center">
-        <div
-          aria-hidden="true"
-          className="flex h-24 w-24 items-center justify-center rounded-full bg-primary-soft text-2xl font-bold text-primary ring-4 ring-neutral-100"
-        >
-          {getInitials(STUDENT.name)}
-        </div>
+        <Image
+          src={STUDENT.photoUrl}
+          alt={`Foto de ${STUDENT.name}`}
+          width={96}
+          height={96}
+          className="h-24 w-24 rounded-full object-cover ring-4 ring-neutral-100"
+        />
         <h1 className="text-xl font-bold text-neutral-800">{STUDENT.name}</h1>
         <p className="text-xs font-semibold text-neutral-500">
           Turma {STUDENT.className} · ID: {STUDENT.enrollmentId}

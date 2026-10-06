@@ -1,6 +1,6 @@
 /**
- * Destinos principais do app. Fonte única para BottomNav e o título da tela no
- * Header, para que rota, rótulo e ícone não divirjam entre eles.
+ * Destinos principais do app, exibidos na BottomNav. Rota, rótulo e ícone ficam
+ * juntos para não divergirem.
  */
 export type NavItem = {
   href: string;
