@@ -42,7 +42,7 @@ const DEADLINES: Omit<React.ComponentProps<typeof DeadlineItem>, "href">[] = [
 // TODO (fase E): substituir por dados reais
 const LATEST_ANNOUNCEMENT = {
   date: "Hoje, 08:30",
-  priority: "Alta",
+  priority: "Urgente",
   title: "Reunião de Pais e Mestres",
   summary:
     "Lembramos que nesta quinta-feira teremos nossa reunião bimestral para acompanhamento do desempenho dos alunos.",
