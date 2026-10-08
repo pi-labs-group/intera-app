@@ -1,6 +1,10 @@
 import { PageHeading } from "@/components/ui/page-heading";
 import { Tabs } from "@/components/ui/tabs";
 import { TaskItem } from "@/components/ui/task-item";
+import {
+  MOCK_STUDENT as STUDENT,
+  requireRole,
+} from "@/server/services/auth-service";
 
 type Task = React.ComponentProps<typeof TaskItem>;
 
@@ -81,12 +85,23 @@ function TaskList({
   );
 }
 
-export default function ActivitiesPage() {
+export default async function ActivitiesPage() {
+  const user = await requireRole(["student", "guardian"]);
+  const isGuardian = user.role === "guardian";
+
   return (
     <div className="space-y-6">
       <PageHeading
-        title="Minhas Atividades"
-        subtitle="Acompanhe seus trabalhos e tarefas."
+        title={
+          isGuardian
+            ? `Atividades de ${STUDENT.firstName}`
+            : "Minhas Atividades"
+        }
+        subtitle={
+          isGuardian
+            ? "Acompanhe os trabalhos e tarefas do aluno."
+            : "Acompanhe seus trabalhos e tarefas."
+        }
       />
       <Tabs
         ariaLabel="Situação das atividades"
