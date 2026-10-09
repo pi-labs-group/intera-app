@@ -1,5 +1,9 @@
 import { PageHeading } from "@/components/ui/page-heading";
 import { SubjectGradeCard } from "@/components/ui/subject-grade-card";
+import {
+  MOCK_STUDENT as STUDENT,
+  requireRole,
+} from "@/server/services/auth-service";
 
 // TODO (fase E): substituir por dados reais
 const SUBJECT_GRADES: React.ComponentProps<typeof SubjectGradeCard>[] = [
@@ -8,12 +12,18 @@ const SUBJECT_GRADES: React.ComponentProps<typeof SubjectGradeCard>[] = [
   { subject: "História", icon: "history_edu", average: 6.8, absences: 4 },
 ];
 
-export default function PerformancePage() {
+export default async function PerformancePage() {
+  const user = await requireRole(["student", "guardian"]);
+
   return (
     <div className="space-y-6">
       <PageHeading
         title="Desempenho por matéria"
-        subtitle="Acompanhe suas notas e faltas no semestre atual."
+        subtitle={
+          user.role === "guardian"
+            ? `Acompanhe as notas e faltas de ${STUDENT.firstName} no semestre atual.`
+            : "Acompanhe suas notas e faltas no semestre atual."
+        }
       />
       <ul className="space-y-3">
         {SUBJECT_GRADES.map((subjectGrade) => (

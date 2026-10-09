@@ -13,6 +13,8 @@ type TabsProps = {
   tabs: TabItem[];
   /** Nome acessível do grupo de abas. */
   ariaLabel: string;
+  /** Aba aberta inicialmente (ex.: vinda de um atalho); padrão: a primeira. */
+  defaultTabId?: string;
 };
 
 /**
@@ -20,8 +22,13 @@ type TabsProps = {
  * ordem do Tab; setas esquerda/direita, Home e End trocam de aba e movem o foco.
  * Só o painel ativo é renderizado.
  */
-export function Tabs({ tabs, ariaLabel }: TabsProps) {
-  const [activeIndex, setActiveIndex] = useState(0);
+export function Tabs({ tabs, ariaLabel, defaultTabId }: TabsProps) {
+  const [activeIndex, setActiveIndex] = useState(() =>
+    Math.max(
+      0,
+      tabs.findIndex((tab) => tab.id === defaultTabId),
+    ),
+  );
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const baseId = useId();
   const activeTab = tabs[activeIndex];

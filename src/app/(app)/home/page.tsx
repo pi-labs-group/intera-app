@@ -3,9 +3,10 @@ import { Card } from "@/components/ui/card";
 import { DeadlineItem } from "@/components/ui/deadline-item";
 import { MetricCard } from "@/components/ui/metric-card";
 import { SectionHeader } from "@/components/ui/section-header";
-
-// TODO (fase E): substituir por dados reais
-const STUDENT = { name: "Lucas Andrade", className: "9º A" };
+import {
+  MOCK_STUDENT as STUDENT,
+  requireRole,
+} from "@/server/services/auth-service";
 
 // TODO (fase E): substituir por dados reais
 const METRICS = {
@@ -48,15 +49,20 @@ const LATEST_ANNOUNCEMENT = {
     "Lembramos que nesta quinta-feira teremos nossa reunião bimestral para acompanhamento do desempenho dos alunos.",
 };
 
-export default function HomePage() {
+export default async function HomePage() {
+  const user = await requireRole(["student", "guardian"]);
+  const isGuardian = user.role === "guardian";
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-neutral-900">
-          Olá, Responsável 👋
+          Olá, {user.firstName} 👋
         </h1>
         <p className="text-sm font-medium text-neutral-600">
-          {STUDENT.name} · {STUDENT.className}
+          {isGuardian
+            ? `Acompanhando ${STUDENT.name} · ${STUDENT.className}`
+            : `Turma ${STUDENT.className}`}
         </p>
       </div>
 

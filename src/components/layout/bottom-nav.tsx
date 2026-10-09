@@ -2,10 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_ITEMS, isActivePath } from "./nav-items";
+import { isActivePath, type NavItem } from "./nav-items";
 
-/** Navegação inferior fixa com os 5 destinos principais; destaca a rota ativa. */
-export function BottomNav() {
+type BottomNavProps = {
+  /** Destinos da área atual (aluno/responsável ou professor). */
+  items: NavItem[];
+};
+
+/** Navegação inferior fixa com os destinos principais; destaca a rota ativa. */
+export function BottomNav({ items }: BottomNavProps) {
   const pathname = usePathname();
 
   return (
@@ -13,8 +18,8 @@ export function BottomNav() {
       aria-label="Navegação principal"
       className="fixed right-0 bottom-0 left-0 z-30 mx-auto flex h-16 max-w-md items-center justify-around border-t border-neutral-200 bg-surface/95 backdrop-blur-md"
     >
-      {NAV_ITEMS.map((item) => {
-        const isActive = isActivePath(pathname, item.href);
+      {items.map((item) => {
+        const isActive = isActivePath(pathname, item.href, items);
         return (
           <Link
             key={item.href}

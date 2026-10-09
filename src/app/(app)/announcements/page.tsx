@@ -1,5 +1,6 @@
 import { NoticeCard } from "@/components/ui/notice-card";
 import { PageHeading } from "@/components/ui/page-heading";
+import { requireRole } from "@/server/services/auth-service";
 
 // TODO (fase E): substituir por dados reais
 const NOTICES: React.ComponentProps<typeof NoticeCard>[] = [
@@ -26,7 +27,9 @@ const NOTICES: React.ComponentProps<typeof NoticeCard>[] = [
   },
 ];
 
-export default function AnnouncementsPage() {
+export default async function AnnouncementsPage() {
+  await requireRole(["student", "guardian"]);
+
   return (
     <div className="space-y-6">
       <PageHeading
