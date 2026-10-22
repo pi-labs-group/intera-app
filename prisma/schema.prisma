@@ -1,0 +1,315 @@
+// Schema do banco do Intera. A URL de conexão fica em prisma.config.ts.
+//
+// Base: Apêndice A da documentação técnica (modelos acadêmicos), com nomes em
+// inglês. Acrescenta o que o app precisa e o apêndice não cobre: usuários e
+// perfis (Seção 2.2), trabalhos e avisos. Não há importação da planilha
+// legada: todos os dados são cadastrados no app.
+//
+// Decisões herdadas do Apêndice A:
+//   1. O aluno é identificado por um id próprio; `registrationNumber` (RA) é
+//      único, mas opcional, pois nem todo aluno tem RA ao ser cadastrado.
+//   2. A média não é recalculada (os pesos não são conhecidos): entra como valor
+//      em BimesterAverage/FinalAverage; as notas individuais ficam em Grade.
+//   3. Notas em formato longo: 1 linha por avaliação; o boletim largo é um pivot.
+//   4. AssessmentType é um catálogo global; cada diário declara o subconjunto que
+//      usa em DiaryAssessment (a lista de avaliações varia por disciplina).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Usuários e perfis ---
+
+enum Role {
+  guardian
+  student
+  teacher
+  secretary
+
+  @@map("role")
+}
+
+// Conta de acesso. O perfil específico (Teacher, Student, Guardian) fica em
+// tabela própria; a secretaria não tem dados além da conta.
+model User {
+  id       String    @id @default(uuid())
+  email    String    @unique
+  name     String
+  role     Role
+  teacher  Teacher?
+  student  Student?
+  guardian Guardian?
+  notices  Notice[]
+
+  @@map("users")
+}
+
+model Teacher {
+  id          String  @id @default(uuid())
+  userId      String  @unique @map("user_id")
+  user        User    @relation(fields: [userId], references: [id])
+  displayName String  @map("display_name") // forma de tratamento exibida (ex.: "Prof. Renato")
+  diaries     Diary[]
+
+  @@map("teachers")
+}
+
+// O aluno é cadastrado pela secretaria e pode nunca ter conta (ex.: alunos
+// novos, acompanhados só pelo responsável). Por isso o nome fica aqui, e não em User.
+model Student {
+  id                 String            @id @default(uuid())
+  registrationNumber String?           @unique @map("registration_number") // RA: opcional; o id interno é a chave
+  name               String
+  photoUrl           String?           @map("photo_url")
+  userId             String?           @unique @map("user_id")
+  user               User?             @relation(fields: [userId], references: [id])
+  enrollments        Enrollment[]
+  guardians          StudentGuardian[]
+
+  @@map("students")
+}
+
+model Guardian {
+  id       String            @id @default(uuid())
+  userId   String            @unique @map("user_id")
+  user     User              @relation(fields: [userId], references: [id])
+  phone    String?
+  students StudentGuardian[]
+
+  @@map("guardians")
+}
+
+model StudentGuardian {
+  studentId    String   @map("student_id")
+  student      Student  @relation(fields: [studentId], references: [id])
+  guardianId   String   @map("guardian_id")
+  guardian     Guardian @relation(fields: [guardianId], references: [id])
+  relationship String // ex.: "Mãe", "Pai", "Avó"
+
+  @@id([studentId, guardianId])
+  @@map("student_guardians")
+}
+
+// --- Estrutura acadêmica (Apêndice A) ---
+
+model SchoolYear {
+  id      Int           @id @default(autoincrement())
+  year    Int           @unique // 2026, 2027...
+  classes SchoolClass[]
+
+  @@map("school_years")
+}
+
+model SchoolClass {
+  id             String       @id @default(uuid())
+  schoolYearId   Int          @map("school_year_id")
+  schoolYear     SchoolYear   @relation(fields: [schoolYearId], references: [id])
+  gradeLevel     String       @map("grade_level") // série/ano escolar (ex.: "9º", "1ª série")
+  name           String // letra da turma: "A", "B"...
+  shift          String
+  educationLevel String       @map("education_level") // "EF"/"EM" — inferência: EF = Ensino Fundamental (confirmar)
+  enrollments    Enrollment[]
+  diaries        Diary[]
+
+  @@unique([schoolYearId, gradeLevel, name, shift])
+  @@map("school_classes")
+}
+
+// Vínculo aluno <-> turma. O nº de chamada mora aqui porque muda a cada
+// ano/turma; não é atributo do aluno.
+model Enrollment {
+  id               String            @id @default(uuid())
+  studentId        String            @map("student_id")
+  student          Student           @relation(fields: [studentId], references: [id])
+  schoolClassId    String            @map("school_class_id")
+  schoolClass      SchoolClass       @relation(fields: [schoolClassId], references: [id])
+  callNumber       Int               @map("call_number")
+  grades           Grade[]
+  attendances      Attendance[]
+  bimesterAverages BimesterAverage[]
+  finalAverages    FinalAverage[]
+
+  @@unique([schoolClassId, callNumber]) // nº de chamada é único DENTRO da turma
+  @@unique([studentId, schoolClassId])
+  @@map("enrollments")
+}
+
+// Componente curricular, identificado pelo código (ex.: "00012").
+model Subject {
+  id      String  @id @default(uuid())
+  code    String  @unique
+  name    String?
+  icon    String? // nome do ícone Material Symbols exibido no app
+  diaries Diary[]
+
+  @@map("subjects")
+}
+
+// Turma + disciplina no ano (o "diário de classe"). O ano vem da turma.
+// O professor é opcional: a secretaria pode criar o diário antes de definir
+// quem leciona.
+model Diary {
+  id               String            @id @default(uuid())
+  schoolClassId    String            @map("school_class_id")
+  schoolClass      SchoolClass       @relation(fields: [schoolClassId], references: [id])
+  subjectId        String            @map("subject_id")
+  subject          Subject           @relation(fields: [subjectId], references: [id])
+  teacherId        String?           @map("teacher_id")
+  teacher          Teacher?          @relation(fields: [teacherId], references: [id])
+  assessments      DiaryAssessment[]
+  grades           Grade[]
+  attendances      Attendance[]
+  bimesterAverages BimesterAverage[]
+  finalAverages    FinalAverage[]
+  syllabusContents SyllabusContent[]
+  assignments      Assignment[]
+  notices          Notice[]
+
+  @@unique([schoolClassId, subjectId])
+  @@index([teacherId])
+  @@map("diaries")
+}
+
+// Catálogo: P1, P2, Simulado, Trabalho, Participação, RecP1, RecP2, PontoExtra.
+// (Média/Faltas/Ausências Compensadas são derivadas — não entram aqui.)
+model AssessmentType {
+  id               String            @id @default(uuid())
+  code             String            @unique
+  name             String
+  grades           Grade[]
+  diaryAssessments DiaryAssessment[]
+
+  @@map("assessment_types")
+}
+
+// Quais tipos de avaliação um diário usa. `order` define a ordem de exibição;
+// `maxGrade` nulo significa sem nota máxima definida.
+model DiaryAssessment {
+  id               String         @id @default(uuid())
+  diaryId          String         @map("diary_id")
+  diary            Diary          @relation(fields: [diaryId], references: [id])
+  assessmentTypeId String         @map("assessment_type_id")
+  assessmentType   AssessmentType @relation(fields: [assessmentTypeId], references: [id])
+  order            Int?
+  maxGrade         Decimal?       @map("max_grade") @db.Decimal(4, 2)
+
+  @@unique([diaryId, assessmentTypeId])
+  @@map("diary_assessments")
+}
+
+// Formato longo: 1 linha por (matrícula, diário, bimestre, tipo de avaliação).
+model Grade {
+  id               String         @id @default(uuid())
+  enrollmentId     String         @map("enrollment_id")
+  enrollment       Enrollment     @relation(fields: [enrollmentId], references: [id])
+  diaryId          String         @map("diary_id")
+  diary            Diary          @relation(fields: [diaryId], references: [id])
+  bimester         Int
+  assessmentTypeId String         @map("assessment_type_id")
+  assessmentType   AssessmentType @relation(fields: [assessmentTypeId], references: [id])
+  value            Decimal        @db.Decimal(4, 2)
+
+  @@unique([enrollmentId, diaryId, bimester, assessmentTypeId])
+  @@index([diaryId, bimester]) // lançamentos do professor: notas do diário no bimestre
+  @@map("grades")
+}
+
+// 1 linha por dia de aula.
+model Attendance {
+  id           String     @id @default(uuid())
+  enrollmentId String     @map("enrollment_id")
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id])
+  diaryId      String     @map("diary_id")
+  diary        Diary      @relation(fields: [diaryId], references: [id])
+  date         DateTime   @db.Date
+  present      Boolean
+  compensated  Boolean    @default(false)
+
+  @@unique([enrollmentId, diaryId, date])
+  @@map("attendances")
+}
+
+// Média fechada do bimestre + faltas agregadas. A média entra como valor.
+model BimesterAverage {
+  id                  String     @id @default(uuid())
+  enrollmentId        String     @map("enrollment_id")
+  enrollment          Enrollment @relation(fields: [enrollmentId], references: [id])
+  diaryId             String     @map("diary_id")
+  diary               Diary      @relation(fields: [diaryId], references: [id])
+  bimester            Int
+  average             Decimal?   @db.Decimal(4, 2)
+  absences            Int        @default(0)
+  compensatedAbsences Int        @default(0) @map("compensated_absences")
+
+  @@unique([enrollmentId, diaryId, bimester])
+  @@map("bimester_averages")
+}
+
+// Média final + nota arredondada. Também entram como valor.
+model FinalAverage {
+  id           String     @id @default(uuid())
+  enrollmentId String     @map("enrollment_id")
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id])
+  diaryId      String     @map("diary_id")
+  diary        Diary      @relation(fields: [diaryId], references: [id])
+  finalAverage Decimal?   @map("final_average") @db.Decimal(4, 2)
+  roundedGrade Int?       @map("rounded_grade")
+
+  @@unique([enrollmentId, diaryId])
+  @@map("final_averages")
+}
+
+// "Resumo do conteúdo programático e das atividades desenvolvidas" (texto livre).
+model SyllabusContent {
+  id       String @id @default(uuid())
+  diaryId  String @map("diary_id")
+  diary    Diary  @relation(fields: [diaryId], references: [id])
+  bimester Int
+  content  String @db.Text
+
+  @@unique([diaryId, bimester])
+  @@map("syllabus_contents")
+}
+
+// --- Rotina do app ---
+
+// Trabalho cadastrado pelo professor; a nota entra como avaliação do tipo TRAB.
+model Assignment {
+  id          String   @id @default(uuid())
+  diaryId     String   @map("diary_id")
+  diary       Diary    @relation(fields: [diaryId], references: [id])
+  title       String
+  dueDate     DateTime @map("due_date") @db.Date
+  description String
+
+  @@map("assignments")
+}
+
+enum NoticePriority {
+  normal
+  urgent
+
+  @@map("notice_priority")
+}
+
+// Aviso publicado para alunos e responsáveis. Sem diário, vale para a escola
+// toda (comunicado da secretaria).
+model Notice {
+  id          String         @id @default(uuid())
+  diaryId     String?        @map("diary_id")
+  diary       Diary?         @relation(fields: [diaryId], references: [id])
+  authorId    String         @map("author_id")
+  author      User           @relation(fields: [authorId], references: [id])
+  priority    NoticePriority @default(normal)
+  title       String
+  body        String
+  publishedAt DateTime       @default(now()) @map("published_at")
+
+  @@index([diaryId])
+  @@map("notices")
+}
