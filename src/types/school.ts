@@ -1,7 +1,7 @@
 /**
- * Tipos do domínio escolar usados pelas telas mockadas. Espelham, de forma
- * simplificada, os modelos do schema Prisma (Apêndice A da documentação):
- * Diario, Matricula, TipoAvaliacao e AvaliacaoDoDiario.
+ * Tipos do domínio escolar entregues às telas. Espelham, de forma simplificada,
+ * os modelos do schema Prisma (Diary, Enrollment, AssessmentType e
+ * DiaryAssessment); os serviços fazem a conversão.
  */
 
 /** Aluno dentro de um diário (vínculo Matricula: o nº de chamada é da turma). */
