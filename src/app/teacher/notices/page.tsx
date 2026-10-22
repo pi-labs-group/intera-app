@@ -13,11 +13,14 @@ export const metadata: Metadata = {
   title: "Avisos da matéria · Intera",
 };
 
-// TODO (fase E): substituir por dados reais
-const PUBLISHED_NOTICES: PublishedNotice[] = [
+// TODO (fase E): substituir por dados reais. Enquanto os avisos forem mock, cada
+// um aponta para o diário real pelo nome da turma.
+const PUBLISHED_NOTICES: (Omit<PublishedNotice, "diaryId"> & {
+  className: string;
+})[] = [
   {
     id: "aviso-1",
-    diaryId: "mat-9a",
+    className: "9º A",
     priority: "urgente",
     title: "Prova 2 remarcada",
     body: "A Prova 2 de Matemática passou para a próxima terça-feira. Conteúdo: equações do 1º grau.",
@@ -25,7 +28,7 @@ const PUBLISHED_NOTICES: PublishedNotice[] = [
   },
   {
     id: "aviso-2",
-    diaryId: "mat-8a",
+    className: "8º A",
     priority: "aviso",
     title: "Levar calculadora",
     body: "Na aula de quinta-feira faremos exercícios de porcentagem; tragam calculadora.",
@@ -52,7 +55,11 @@ export default async function TeacherNoticesPage() {
           className,
         }))}
         author={`${teacher.displayName} (${teacher.subject})`}
-        initialNotices={PUBLISHED_NOTICES}
+        initialNotices={PUBLISHED_NOTICES.map(({ className, ...notice }) => ({
+          ...notice,
+          diaryId:
+            diaries.find((diary) => diary.className === className)?.id ?? "",
+        }))}
       />
     </div>
   );
