@@ -43,3 +43,7 @@ next-env.d.ts
 escola-interacao-prototipo.html
 escola-interacao-prototipo-petroleo-frio.html
 paleta-intera.md
+
+# prisma client (gerado por `prisma generate`)
+/src/generated/
+Intera_Documentacao_Tecnica.pdf

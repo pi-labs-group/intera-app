@@ -31,7 +31,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ### Fluxo de versionamento
 
-- Branches: feature/\* → PR para dev → PR para main. Nunca push direto na main.
+- Branches: só `main` e `dev`. Commits vão direto na `dev`; a `main` recebe código
+  apenas por PR de `dev` para `main`. Nunca commit nem push direto na `main`.
+- Depois de cada merge na `main`, sincronize a `dev` (`git push origin main:dev`).
 - Mensagens: Conventional Commits (feat, fix, chore, docs, refactor, test).
 - Agentes de IA nunca fazem commit nem push. Quem commita é o desenvolvedor.
 

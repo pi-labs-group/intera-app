@@ -5,3 +5,4 @@ node_modules
 package-lock.json
 next-env.d.ts
 escola-interacao-prototipo.html
+src/generated

@@ -33,8 +33,10 @@ Cada camada só conversa com a camada imediatamente abaixo dela. Assim, uma muda
 no banco de dados afeta apenas os repositórios, e uma mudança de regra de negócio
 afeta apenas os serviços.
 
-> Prisma e Supabase entram em fases futuras do projeto. As pastas já existem para
-> que a estrutura fique clara desde o início.
+> O schema fica em `prisma/schema.prisma` (tabelas e colunas em snake_case) e o
+> Prisma Client é gerado em `src/generated/prisma`. Professor e secretaria já leem
+> do banco; as telas de aluno e responsável, as gravações e a autenticação
+> (Supabase Auth) ainda são mock.
 
 ## Fronteira entre servidor e cliente
 

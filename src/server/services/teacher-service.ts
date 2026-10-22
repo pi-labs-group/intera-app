@@ -1,79 +1,116 @@
 import "server-only";
 
-import type { Diary, Teacher } from "@/types/school";
+import { cache } from "react";
+import { gradeKey } from "@/lib/gradebook";
+import { ROLES } from "@/lib/roles";
+import { listDiariesByTeacher } from "@/server/repositories/diary-repository";
+import { listByDiaries } from "@/server/repositories/grade-repository";
+import { findTeacherByEmail } from "@/server/repositories/teacher-repository";
+import type { Bimester, Diary, Teacher } from "@/types/school";
 import { requireRole } from "./auth-service";
 
 /**
- * Leitura dos diários do professor. Por enquanto devolve dados mockados; na fase E
- * passa a consultar DiarioRepository/MatriculaRepository (Seção 8.2). Cada função
- * verifica a sessão, pois os dados dos alunos só podem chegar ao professor.
+ * Leitura dos diários e das notas do professor da sessão. Cada função verifica a
+ * sessão, pois os dados dos alunos só podem chegar ao professor; as notas são
+ * buscadas apenas nos diários dele.
  */
 
-// TODO (fase E): substituir por dados reais
-const TEACHER: Teacher = {
-  name: "Renato Lima",
-  displayName: "Prof. Renato",
-  subject: "Matemática",
-};
+// Diário sem nota máxima definida (DiaryAssessment.maxGrade nulo) usa a escala 0–10.
+const DEFAULT_MAX_GRADE = 10;
+const DEFAULT_SUBJECT_ICON = "book";
 
-// Avaliações do diário: o catálogo varia por disciplina (AvaliacaoDoDiario).
-const MATH_ASSESSMENTS: Diary["assessments"] = [
-  { id: "p1", code: "P1", name: "Prova 1", maxGrade: 10 },
-  { id: "p2", code: "P2", name: "Prova 2", maxGrade: 10 },
-  { id: "sim", code: "SIM", name: "Simulado", maxGrade: 10 },
-  { id: "part", code: "PART", name: "Participação", maxGrade: 10 },
-];
+function currentSchoolYear(): number {
+  const year = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+  }).format(new Date());
+  return Number(year);
+}
 
-// TODO (fase E): substituir por dados reais
-const DIARIES: Diary[] = [
-  {
-    id: "mat-9a",
-    subject: "Matemática",
-    subjectIcon: "calculate",
-    className: "9º A",
-    assessments: MATH_ASSESSMENTS,
-    students: [
-      { enrollmentId: "m-9a-01", callNumber: 1, name: "Ana Souza" },
-      { enrollmentId: "m-9a-02", callNumber: 2, name: "Bruno Alves" },
-      { enrollmentId: "m-9a-03", callNumber: 3, name: "Carla Dias" },
-      { enrollmentId: "m-9a-04", callNumber: 4, name: "Diego Farias" },
-      { enrollmentId: "m-9a-05", callNumber: 5, name: "Elisa Gomes" },
-      { enrollmentId: "m-9a-06", callNumber: 6, name: "Felipe Melo" },
-      { enrollmentId: "m-9a-07", callNumber: 7, name: "Lucas Andrade" },
-    ],
-    assignments: [
-      {
-        id: "trab-9a-1",
-        title: "Frações no cotidiano",
-        dueDate: "2026-10-20",
-        description: "Pesquisa em dupla com exemplos de frações em receitas.",
-      },
-    ],
-  },
-  {
-    id: "mat-8a",
-    subject: "Matemática",
-    subjectIcon: "calculate",
-    className: "8º A",
-    assessments: MATH_ASSESSMENTS,
-    students: [
-      { enrollmentId: "m-8a-01", callNumber: 1, name: "Gabriela Nunes" },
-      { enrollmentId: "m-8a-02", callNumber: 2, name: "Henrique Prado" },
-      { enrollmentId: "m-8a-03", callNumber: 3, name: "Isabela Rocha" },
-      { enrollmentId: "m-8a-04", callNumber: 4, name: "João Pedro Lima" },
-      { enrollmentId: "m-8a-05", callNumber: 5, name: "Larissa Teixeira" },
-    ],
-    assignments: [],
-  },
-];
+/**
+ * Professor da sessão. Enquanto a autenticação for mock, a sessão não tem e-mail:
+ * o professor é encontrado pelo e-mail de demonstração do perfil.
+ * TODO (fase de auth): usar o e-mail do usuário autenticado no Supabase.
+ */
+const findSessionTeacher = cache(async () => {
+  const user = await requireRole(["teacher"]);
+  const teacher = await findTeacherByEmail(ROLES[user.role].demoEmail);
+  if (!teacher) {
+    throw new Error(
+      "Professor da sessão não encontrado no banco. Rode `npm run db:seed`.",
+    );
+  }
+  return teacher;
+});
+
+const loadSessionDiaries = cache(async () => {
+  const teacher = await findSessionTeacher();
+  return listDiariesByTeacher(teacher.id, currentSchoolYear());
+});
 
 export async function getCurrentTeacher(): Promise<Teacher> {
-  await requireRole(["teacher"]);
-  return TEACHER;
+  const [teacher, diaries] = await Promise.all([
+    findSessionTeacher(),
+    loadSessionDiaries(),
+  ]);
+  const subjects = new Set(
+    diaries.map((diary) => diary.subject.name ?? diary.subject.code),
+  );
+  return {
+    name: teacher.user.name,
+    displayName: teacher.displayName,
+    subject: [...subjects].join(", "),
+  };
 }
 
 /** Diários (turma + disciplina) atribuídos ao professor no ano letivo atual. */
 export async function getTeacherDiaries(): Promise<Diary[]> {
-  await requireRole(["teacher"]);
-  return DIARIES;
+  const diaries = await loadSessionDiaries();
+  return diaries.map((diary) => ({
+    id: diary.id,
+    subject: diary.subject.name ?? diary.subject.code,
+    subjectIcon: diary.subject.icon ?? DEFAULT_SUBJECT_ICON,
+    className: `${diary.schoolClass.gradeLevel} ${diary.schoolClass.name}`,
+    students: diary.schoolClass.enrollments.map((enrollment) => ({
+      enrollmentId: enrollment.id,
+      callNumber: enrollment.callNumber,
+      name: enrollment.student.name,
+    })),
+    // O id da avaliação é o do tipo, que é a chave usada nas notas (Grade).
+    assessments: diary.assessments.map((assessment) => ({
+      id: assessment.assessmentTypeId,
+      code: assessment.assessmentType.code,
+      name: assessment.assessmentType.name,
+      maxGrade: assessment.maxGrade?.toNumber() ?? DEFAULT_MAX_GRADE,
+    })),
+    assignments: diary.assignments.map((assignment) => ({
+      id: assignment.id,
+      title: assignment.title,
+      dueDate: assignment.dueDate.toISOString().slice(0, 10),
+      description: assignment.description,
+    })),
+  }));
+}
+
+/**
+ * Notas já lançadas nos diários do professor, indexadas por `gradeKey` e
+ * formatadas como o professor digita (vírgula decimal, ex.: "7,5").
+ */
+export async function getTeacherGrades(): Promise<Record<string, string>> {
+  const diaries = await loadSessionDiaries();
+  const grades = await listByDiaries(diaries.map((diary) => diary.id));
+  return Object.fromEntries(
+    grades.map((grade) => [
+      gradeKey(
+        grade.diaryId,
+        grade.bimester as Bimester,
+        grade.assessmentTypeId,
+        grade.enrollmentId,
+      ),
+      grade.value.toNumber().toLocaleString("pt-BR", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 2,
+      }),
+    ]),
+  );
 }

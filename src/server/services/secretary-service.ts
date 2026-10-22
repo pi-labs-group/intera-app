@@ -1,10 +1,18 @@
 import "server-only";
 
+import type { Role } from "@/lib/validation/auth";
+import {
+  countStudents,
+  countUsersByRole,
+  listAssessmentTypesWithUsage,
+  listClassesWithCounts,
+  listSubjects,
+} from "@/server/repositories/school-repository";
 import { requireRole } from "./auth-service";
 
 /**
- * Dados da área administrativa (secretaria). Mockados por enquanto; na fase E
- * passam a vir dos repositórios de turmas, disciplinas, usuários e avaliações.
+ * Dados da área administrativa (secretaria): turmas, disciplinas, usuários e
+ * tipos de avaliação, lidos do banco.
  */
 
 export type SchoolClassSummary = {
@@ -41,40 +49,62 @@ export type SecretaryOverview = {
   assessmentTypes: AssessmentTypeSummary[];
 };
 
-// TODO (fase E): substituir por dados reais
-const OVERVIEW: SecretaryOverview = {
-  lastLegacyImport: "20/09/2026, 09:12",
-  classes: [
-    { name: "8º A", shift: "Manhã", studentCount: 28, diaryCount: 9 },
-    { name: "8º B", shift: "Tarde", studentCount: 25, diaryCount: 9 },
-    { name: "9º A", shift: "Manhã", studentCount: 30, diaryCount: 10 },
-    { name: "1ª série EM", shift: "Manhã", studentCount: 32, diaryCount: 12 },
-  ],
-  subjects: [
-    { code: "00012", name: "Matemática" },
-    { code: "00013", name: "Língua Portuguesa" },
-    { code: "00021", name: "Ciências" },
-    { code: "00031", name: "História" },
-    { code: "00032", name: "Geografia" },
-    { code: "00041", name: "Educação Física" },
-  ],
-  userGroups: [
-    { label: "Alunos", icon: "school", count: 115 },
-    { label: "Responsáveis", icon: "family_restroom", count: 162 },
-    { label: "Professores", icon: "co_present", count: 14 },
-    { label: "Secretaria", icon: "badge", count: 2 },
-  ],
-  assessmentTypes: [
-    { code: "P1", name: "Prova 1", diaryCount: 40 },
-    { code: "P2", name: "Prova 2", diaryCount: 40 },
-    { code: "SIM", name: "Simulado", diaryCount: 22 },
-    { code: "TRAB", name: "Trabalho", diaryCount: 31 },
-    { code: "PART", name: "Participação", diaryCount: 18 },
-    { code: "REC", name: "Recuperação", diaryCount: 40 },
-  ],
-};
+// TODO: o card de importação legada sai da tela; até lá a data continua mock.
+const LAST_LEGACY_IMPORT = "20/09/2026, 09:12";
+
+// Grupos exibidos nos cards de usuários. Alunos contam todos os cadastrados,
+// com ou sem conta de acesso; os demais perfis contam as contas.
+const USER_GROUPS: { label: string; icon: string; role: Role }[] = [
+  { label: "Alunos", icon: "school", role: "student" },
+  { label: "Responsáveis", icon: "family_restroom", role: "guardian" },
+  { label: "Professores", icon: "co_present", role: "teacher" },
+  { label: "Secretaria", icon: "badge", role: "secretary" },
+];
+
+function currentSchoolYear(): number {
+  const year = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+  }).format(new Date());
+  return Number(year);
+}
 
 export async function getSecretaryOverview(): Promise<SecretaryOverview> {
   await requireRole(["secretary"]);
-  return OVERVIEW;
+  const [classes, subjects, assessmentTypes, studentCount, usersByRole] =
+    await Promise.all([
+      listClassesWithCounts(currentSchoolYear()),
+      listSubjects(),
+      listAssessmentTypesWithUsage(),
+      countStudents(),
+      countUsersByRole(),
+    ]);
+  const accountsByRole = new Map(
+    usersByRole.map((group) => [group.role, group._count._all]),
+  );
+
+  return {
+    lastLegacyImport: LAST_LEGACY_IMPORT,
+    classes: classes.map((schoolClass) => ({
+      name: `${schoolClass.gradeLevel} ${schoolClass.name}`,
+      shift: schoolClass.shift,
+      studentCount: schoolClass._count.enrollments,
+      diaryCount: schoolClass._count.diaries,
+    })),
+    subjects: subjects.map((subject) => ({
+      code: subject.code,
+      name: subject.name ?? subject.code,
+    })),
+    userGroups: USER_GROUPS.map(({ label, icon, role }) => ({
+      label,
+      icon,
+      count:
+        role === "student" ? studentCount : (accountsByRole.get(role) ?? 0),
+    })),
+    assessmentTypes: assessmentTypes.map((type) => ({
+      code: type.code,
+      name: type.name,
+      diaryCount: type._count.diaryAssessments,
+    })),
+  };
 }
