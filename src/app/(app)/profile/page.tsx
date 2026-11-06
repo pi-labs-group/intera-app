@@ -79,7 +79,7 @@ export default async function ProfilePage() {
         <p className="text-xs font-semibold text-neutral-500">
           {isGuardian
             ? `Responsável · ${GUARDIAN.relationship}`
-            : `Turma ${STUDENT.className} · ID: ${STUDENT.enrollmentId}`}
+            : `Turma ${STUDENT.className} · ID: ${STUDENT.registrationNumber}`}
         </p>
       </div>
 
@@ -102,7 +102,7 @@ export default async function ProfilePage() {
                 {STUDENT.name}
               </p>
               <p className="text-xs text-neutral-500">
-                Turma {STUDENT.className} · ID: {STUDENT.enrollmentId}
+                Turma {STUDENT.className} · ID: {STUDENT.registrationNumber}
               </p>
             </div>
           </div>

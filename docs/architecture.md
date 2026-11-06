@@ -34,9 +34,10 @@ no banco de dados afeta apenas os repositórios, e uma mudança de regra de neg�
 afeta apenas os serviços.
 
 > O schema fica em `prisma/schema.prisma` (tabelas e colunas em snake_case) e o
-> Prisma Client é gerado em `src/generated/prisma`. Professor e secretaria já leem
-> do banco; as telas de aluno e responsável, as gravações e a autenticação
-> (Supabase Auth) ainda são mock.
+> Prisma Client é gerado em `src/generated/prisma`. Professor, secretaria e a tela
+> de desempenho do aluno/responsável leem do banco, e os lançamentos do professor
+> (notas, trabalhos e chamada) gravam via Server Actions. As demais telas de aluno e
+> responsável, os avisos e a autenticação (Supabase Auth) ainda são mock.
 
 ## Fronteira entre servidor e cliente
 
@@ -91,3 +92,51 @@ qualquer dado pode chegar. Por isso, toda entrada externa (formulários, parâme
 rota, variáveis de ambiente) é validada com **Zod** no ponto em que entra no sistema.
 Os tipos usados no código derivam desses schemas (`z.infer`), de modo que validação e
 tipagem nunca ficam desalinhadas.
+
+## Autorização e Row Level Security
+
+O Prisma conecta ao banco como **dono das tabelas** e, por isso, **ignora o RLS**.
+Toda a autorização do app está no código:
+
+- `requireRole` (em `src/server/services/auth-service.ts`) nas páginas e nos serviços;
+- as checagens de dono nos serviços. Exemplo: as gravações do professor
+  (`grade-write-service.ts`) conferem, na mesma transação, que o diário é do
+  professor da sessão e do ano letivo atual e que as matrículas estão ativas na turma.
+
+O RLS ligado sem políticas só bloqueia a Data API do Supabase (chave `anon`).
+
+Enquanto a sessão for o cookie de demonstração, sem assinatura, **não publique o app
+em URL aberta com dados reais de alunos**. São dados de menores, e o art. 14 da LGPD
+(Lei 13.709/2018) se aplica.
+
+## Decisões pendentes
+
+Regras que a escola ainda não confirmou. O código as trata como configuração, não
+como verdade:
+
+| ID  | Decisão                                        | Valor atual                                                                    | Onde está                             |
+| --- | ---------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------- |
+| D1  | Média de aprovação                             | `PASSING_GRADE = 6` (do protótipo); faixa "ótimo" a partir de `HIGH_GRADE = 7` | `src/lib/school-config.ts`            |
+| D2  | Quem produz `BimesterAverage` e `FinalAverage` | Ninguém ainda: a tela mostra a média só se a linha existir                     | `student-service.ts`                  |
+| D3  | Como as notas de trabalho entram na média      | Sem consolidação: ficam em `AssignmentGrade`; TRAB não aparece na aba Notas    | `schema.prisma`, `teacher-service.ts` |
+| D4  | Datas dos bimestres de 2026                    | Fictícias no seed                                                              | `prisma/seed.ts` (`SCHOOL_PERIODS`)   |
+| D5  | Mínimo de notas para exibir a média da turma   | `MIN_CLASS_SAMPLE = 5` (escolha do projeto, não norma legal)                   | `src/lib/school-config.ts`            |
+| D6  | Campo de nota esvaziado pelo professor         | Apaga a nota existente                                                         | `grade-write-service.ts`              |
+
+## Comparação com a média da turma
+
+Na tela de desempenho, cada nota do aluno (avaliação, trabalho ou média do
+bimestre) vem com a média da turma no mesmo item:
+
+- **O que entra:** as notas lançadas por matrículas **ativas** do diário, no mesmo
+  bimestre e item. A nota do próprio aluno entra no cálculo.
+- **Privacidade:** a agregação é feita no banco (`groupBy`). O aluno e o responsável
+  recebem só a média e a quantidade de notas, nunca notas ou matrículas de colegas.
+- **Amostra mínima (D5):** com menos de `MIN_CLASS_SAMPLE` notas, a média não é
+  exibida e a tela diz "Média da turma indisponível (poucas notas lançadas)".
+- **Arredondamento:** a posição (acima, igual, abaixo) é calculada sobre os valores
+  arredondados a 1 casa, os mesmos exibidos (`roundTo1`). A tela nunca diz "abaixo"
+  com dois números iguais. O texto diz "média da turma", para não se confundir com o
+  rótulo "ABAIXO DA MÉDIA" da faixa de aprovação.
+- **Professor:** no editor de lançamentos, ele vê a média dos valores digitados, sem
+  mínimo de amostra, porque já vê todas as notas.

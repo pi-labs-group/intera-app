@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import {
   FIELD_ERROR_CLASSES,
   INPUT_CLASSES,
@@ -9,9 +9,28 @@ import {
   SECONDARY_BUTTON_CLASSES,
 } from "@/components/ui/form-classes";
 import { Tabs } from "@/components/ui/tabs";
-import { gradeKey } from "@/lib/gradebook";
+import { averageOf, describeTeacherClassAverage } from "@/lib/class-comparison";
+import {
+  LESSON_NUMBERS,
+  assignmentGradeKey,
+  attendanceKey,
+  gradeKey,
+} from "@/lib/gradebook";
 import { assignmentSchema, parseGrade } from "@/lib/validation/teacher";
-import type { Assignment, Bimester, Diary } from "@/types/school";
+import type {
+  Assignment,
+  Bimester,
+  Diary,
+  DiaryStudent,
+  LessonNumber,
+} from "@/types/school";
+import {
+  createAssignment,
+  saveAssessmentGrades,
+  saveAssignmentGrades,
+  saveAttendance,
+  type ActionResult,
+} from "../actions";
 import { AttendanceList } from "./attendance-list";
 import { GradeEntryList } from "./grade-entry-list";
 
@@ -22,14 +41,18 @@ type GradebookEditorProps = {
   diaries: [Diary, ...Diary[]];
   /** Data de hoje (AAAA-MM-DD) calculada no servidor, para evitar divergência de fuso na hidratação. */
   today: string;
+  /** Bimestre em vigor, pelo calendário cadastrado; é o aberto inicialmente. */
+  currentBimester: Bimester;
   defaultTab?: GradebookTab;
   /** Notas já lançadas, no formato de `gradeKey`. */
   initialGrades: Record<string, string>;
+  /** Notas de trabalho já lançadas, no formato de `assignmentGradeKey`. */
+  initialAssignmentGrades: Record<string, string>;
+  /** Faltas já registradas, por `attendanceKey`. */
+  initialAbsences: Record<string, string[]>;
 };
 
 const BIMESTERS: Bimester[] = [1, 2, 3, 4];
-const CURRENT_BIMESTER: Bimester = 4;
-const ASSIGNMENT_MAX_GRADE = 10;
 
 /** Resultado da última ação; fica preso à aba onde foi gerado. */
 type SaveFeedback = {
@@ -63,22 +86,50 @@ function Feedback({
 }
 
 /**
+ * Média dos valores válidos digitados, calculada no cliente. Para o professor
+ * não há mínimo de amostra: ele já vê todas as notas.
+ */
+function ClassAverageNote({
+  students,
+  values,
+  maxGrade,
+}: {
+  students: DiaryStudent[];
+  values: Record<string, string>;
+  maxGrade: number;
+}) {
+  const validValues = students.flatMap((student) => {
+    const result = parseGrade(values[student.enrollmentId] ?? "", maxGrade);
+    return result.ok && result.value !== null ? [result.value] : [];
+  });
+  return (
+    <p className="text-sm text-neutral-600">
+      {describeTeacherClassAverage(averageOf(validValues), students.length)}
+    </p>
+  );
+}
+
+/**
  * Editor do diário do professor: escolhe turma e bimestre e lança notas de
- * avaliações, trabalhos e faltas. Tudo fica em estado local — salvar apenas
- * simula a gravação, pois ainda não há banco de dados.
- *
- * TODO (fase E): salvar via Server Actions (NotaService.lancar e
- * FrequenciaService.registrar), com os DTOs validados na borda.
+ * avaliações, trabalhos e faltas. Salvar chama as Server Actions, que revalidam
+ * tudo no servidor; a validação daqui só adianta o aviso ao professor.
  */
 export function GradebookEditor({
   diaries,
   today,
+  currentBimester,
   defaultTab,
   initialGrades,
+  initialAssignmentGrades,
+  initialAbsences,
 }: GradebookEditorProps) {
+  const [isPending, startTransition] = useTransition();
   const [diaryId, setDiaryId] = useState(diaries[0].id);
-  const [bimester, setBimester] = useState<Bimester>(CURRENT_BIMESTER);
+  const [bimester, setBimester] = useState<Bimester>(currentBimester);
   const [grades, setGrades] = useState(initialGrades);
+  const [assignmentGrades, setAssignmentGrades] = useState(
+    initialAssignmentGrades,
+  );
   const [feedback, setFeedback] = useState<SaveFeedback>(null);
 
   const [assessmentId, setAssessmentId] = useState(
@@ -90,9 +141,7 @@ export function GradebookEditor({
   >(() =>
     Object.fromEntries(diaries.map((diary) => [diary.id, diary.assignments])),
   );
-  const [selectedAssignmentId, setSelectedAssignmentId] = useState(
-    diaries[0].assignments[0]?.id ?? "",
-  );
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState("");
   const [assignmentDraft, setAssignmentDraft] = useState({
     title: "",
     dueDate: today,
@@ -103,31 +152,43 @@ export function GradebookEditor({
   >({});
 
   const [attendanceDate, setAttendanceDate] = useState(today);
-  /** Faltas por "diário|data", para cada chamada guardar a sua marcação. */
-  const [absences, setAbsences] = useState<Record<string, Set<string>>>({});
+  const [lessonNumber, setLessonNumber] = useState<LessonNumber>(1);
+  /** Faltas por `attendanceKey`, para cada chamada guardar a sua marcação. */
+  const [absences, setAbsences] = useState<Record<string, Set<string>>>(() =>
+    Object.fromEntries(
+      Object.entries(initialAbsences).map(([key, ids]) => [key, new Set(ids)]),
+    ),
+  );
 
   const diary = diaries.find((item) => item.id === diaryId) ?? diaries[0];
 
   const assessment =
     diary.assessments.find((item) => item.id === assessmentId) ??
     diary.assessments[0];
-  const assignments = assignmentsByDiary[diary.id] ?? [];
+  // Só os trabalhos do bimestre selecionado.
+  const assignments = (assignmentsByDiary[diary.id] ?? []).filter(
+    (item) => item.bimester === bimester,
+  );
   const selectedAssignment =
     assignments.find((item) => item.id === selectedAssignmentId) ??
     assignments[0];
-  const attendanceKey = `${diary.id}|${attendanceDate}`;
-  const absentIds = absences[attendanceKey] ?? new Set<string>();
+  const currentAttendanceKey = attendanceKey(
+    diary.id,
+    attendanceDate,
+    lessonNumber,
+  );
+  const absentIds = absences[currentAttendanceKey] ?? new Set<string>();
 
   function changeDiary(nextDiaryId: string) {
     const nextDiary = diaries.find((item) => item.id === nextDiaryId);
     setDiaryId(nextDiaryId);
     setAssessmentId(nextDiary?.assessments[0]?.id ?? "");
-    setSelectedAssignmentId(assignmentsByDiary[nextDiaryId]?.[0]?.id ?? "");
+    setSelectedAssignmentId("");
     setFeedback(null);
   }
 
-  /** Valores digitados de uma avaliação, indexados por matrícula. */
-  function valuesFor(evaluationId: string): Record<string, string> {
+  /** Valores digitados de uma avaliação no bimestre, indexados por matrícula. */
+  function assessmentValues(evaluationId: string): Record<string, string> {
     return Object.fromEntries(
       diary.students.map((student) => [
         student.enrollmentId,
@@ -138,43 +199,80 @@ export function GradebookEditor({
     );
   }
 
-  function updateGrade(
-    evaluationId: string,
-    enrollmentId: string,
-    value: string,
-  ) {
-    setGrades((current) => ({
-      ...current,
-      [gradeKey(diary.id, bimester, evaluationId, enrollmentId)]: value,
-    }));
-    setFeedback(null);
+  /** Valores digitados de um trabalho, indexados por matrícula. */
+  function assignmentValues(assignmentId: string): Record<string, string> {
+    return Object.fromEntries(
+      diary.students.map((student) => [
+        student.enrollmentId,
+        assignmentGrades[
+          assignmentGradeKey(assignmentId, student.enrollmentId)
+        ] ?? "",
+      ]),
+    );
   }
 
-  function saveGrades(
+  /** Conta as notas inválidas; se houver, avisa e impede o envio. */
+  function rejectInvalid(
     tab: GradebookTab,
-    evaluationId: string,
-    evaluationName: string,
+    values: Record<string, string>,
     maxGrade: number,
-  ) {
-    const results = Object.values(valuesFor(evaluationId)).map((raw) =>
-      parseGrade(raw, maxGrade),
-    );
-    const invalidCount = results.filter((result) => !result.ok).length;
-    if (invalidCount > 0) {
-      setFeedback({
-        tab,
-        tone: "error",
-        message: `Corrija ${invalidCount} ${invalidCount === 1 ? "nota inválida" : "notas inválidas"} antes de salvar.`,
-      });
-      return;
-    }
-    const filled = results.filter(
-      (result) => result.ok && result.value !== null,
+  ): boolean {
+    const invalidCount = Object.values(values).filter(
+      (raw) => !parseGrade(raw, maxGrade).ok,
     ).length;
+    if (invalidCount === 0) return false;
     setFeedback({
       tab,
-      tone: "success",
-      message: `${evaluationName}: ${filled} de ${results.length} notas salvas no ${bimester}º bimestre (simulação, sem banco de dados).`,
+      tone: "error",
+      message: `Corrija ${invalidCount} ${invalidCount === 1 ? "nota inválida" : "notas inválidas"} antes de salvar.`,
+    });
+    return true;
+  }
+
+  function showResult(tab: GradebookTab, result: ActionResult<unknown>) {
+    setFeedback({
+      tab,
+      tone: result.ok ? "success" : "error",
+      message: result.message,
+    });
+  }
+
+  function toBatch(values: Record<string, string>) {
+    return Object.entries(values).map(([enrollmentId, raw]) => ({
+      enrollmentId,
+      raw,
+    }));
+  }
+
+  function saveAssessment() {
+    if (!assessment) return;
+    const values = assessmentValues(assessment.id);
+    if (rejectInvalid("grades", values, assessment.maxGrade)) return;
+    startTransition(async () => {
+      const result = await saveAssessmentGrades({
+        diaryId: diary.id,
+        bimester,
+        assessmentTypeId: assessment.id,
+        assessmentName: assessment.name,
+        grades: toBatch(values),
+      });
+      showResult("grades", result);
+    });
+  }
+
+  function saveSelectedAssignment() {
+    if (!selectedAssignment) return;
+    const values = assignmentValues(selectedAssignment.id);
+    if (rejectInvalid("assignments", values, selectedAssignment.maxGrade)) {
+      return;
+    }
+    startTransition(async () => {
+      const result = await saveAssignmentGrades({
+        assignmentId: selectedAssignment.id,
+        assignmentTitle: selectedAssignment.title,
+        grades: toBatch(values),
+      });
+      showResult("assignments", result);
     });
   }
 
@@ -191,46 +289,56 @@ export function GradebookEditor({
       return;
     }
 
-    const assignment: Assignment = {
-      id: `trab-${Date.now()}`,
-      ...parsed.data,
-    };
-    setAssignmentsByDiary((current) => ({
-      ...current,
-      [diary.id]: [...(current[diary.id] ?? []), assignment],
-    }));
-    setSelectedAssignmentId(assignment.id);
-    setAssignmentDraft({ title: "", dueDate: today, description: "" });
-    setAssignmentErrors({});
-    setFeedback({
-      tab: "assignments",
-      tone: "success",
-      message: `Trabalho "${assignment.title}" cadastrado para o ${diary.className}. Lance as notas abaixo.`,
+    const targetDiaryId = diary.id;
+    startTransition(async () => {
+      const result = await createAssignment({
+        ...parsed.data,
+        diaryId: targetDiaryId,
+        bimester,
+      });
+      if (!result.ok) {
+        setAssignmentErrors(result.fieldErrors ?? {});
+        showResult("assignments", result);
+        return;
+      }
+      setAssignmentsByDiary((current) => ({
+        ...current,
+        [targetDiaryId]: [...(current[targetDiaryId] ?? []), result.data],
+      }));
+      setSelectedAssignmentId(result.data.id);
+      setAssignmentDraft({ title: "", dueDate: today, description: "" });
+      setAssignmentErrors({});
+      showResult("assignments", result);
     });
   }
 
   function toggleAbsence(enrollmentId: string) {
     setAbsences((current) => {
-      const next = new Set(current[attendanceKey] ?? []);
+      const next = new Set(current[currentAttendanceKey] ?? []);
       if (next.has(enrollmentId)) next.delete(enrollmentId);
       else next.add(enrollmentId);
-      return { ...current, [attendanceKey]: next };
+      return { ...current, [currentAttendanceKey]: next };
     });
     setFeedback(null);
   }
 
   function markAllPresent() {
-    setAbsences((current) => ({ ...current, [attendanceKey]: new Set() }));
+    setAbsences((current) => ({
+      ...current,
+      [currentAttendanceKey]: new Set(),
+    }));
     setFeedback(null);
   }
 
-  function saveAttendance() {
-    const count = absentIds.size;
-    const [year, month, day] = attendanceDate.split("-");
-    setFeedback({
-      tab: "attendance",
-      tone: "success",
-      message: `Chamada de ${day}/${month}/${year} salva: ${count} ${count === 1 ? "falta" : "faltas"} (simulação, sem banco de dados).`,
+  function submitAttendance() {
+    startTransition(async () => {
+      const result = await saveAttendance({
+        diaryId: diary.id,
+        date: attendanceDate,
+        lessonNumber,
+        absentEnrollmentIds: [...absentIds],
+      });
+      showResult("attendance", result);
     });
   }
 
@@ -258,30 +366,33 @@ export function GradebookEditor({
       </div>
       <GradeEntryList
         students={diary.students}
-        values={valuesFor(assessment.id)}
+        values={assessmentValues(assessment.id)}
         maxGrade={assessment.maxGrade}
         assessmentLabel={assessment.name}
-        onChange={(enrollmentId, value) =>
-          updateGrade(assessment.id, enrollmentId, value)
-        }
+        onChange={(enrollmentId, value) => {
+          setGrades((current) => ({
+            ...current,
+            [gradeKey(diary.id, bimester, assessment.id, enrollmentId)]: value,
+          }));
+          setFeedback(null);
+        }}
+      />
+      <ClassAverageNote
+        students={diary.students}
+        values={assessmentValues(assessment.id)}
+        maxGrade={assessment.maxGrade}
       />
       <Feedback feedback={feedback} tab="grades" />
       <button
         type="button"
-        onClick={() =>
-          saveGrades(
-            "grades",
-            assessment.id,
-            assessment.name,
-            assessment.maxGrade,
-          )
-        }
+        onClick={saveAssessment}
+        disabled={isPending}
         className={PRIMARY_BUTTON_CLASSES}
       >
         <span className="material-symbols-outlined" aria-hidden="true">
           check
         </span>
-        Salvar notas
+        {isPending ? "Salvando…" : "Salvar notas"}
       </button>
     </div>
   ) : (
@@ -297,7 +408,9 @@ export function GradebookEditor({
         noValidate
         className="space-y-3 rounded-2xl border border-primary-border bg-surface p-4"
       >
-        <h2 className="text-base font-bold text-neutral-800">Novo trabalho</h2>
+        <h2 className="text-base font-bold text-neutral-800">
+          Novo trabalho · {bimester}º bimestre
+        </h2>
         <div className="space-y-1">
           <label htmlFor="assignment-title" className={LABEL_CLASSES}>
             Título
@@ -380,7 +493,11 @@ export function GradebookEditor({
             </p>
           )}
         </div>
-        <button type="submit" className={`${SECONDARY_BUTTON_CLASSES} w-full`}>
+        <button
+          type="submit"
+          disabled={isPending}
+          className={`${SECONDARY_BUTTON_CLASSES} w-full`}
+        >
           <span className="material-symbols-outlined" aria-hidden="true">
             add
           </span>
@@ -420,37 +537,42 @@ export function GradebookEditor({
           </div>
           <GradeEntryList
             students={diary.students}
-            values={valuesFor(selectedAssignment.id)}
-            maxGrade={ASSIGNMENT_MAX_GRADE}
+            values={assignmentValues(selectedAssignment.id)}
+            maxGrade={selectedAssignment.maxGrade}
             assessmentLabel={`Trabalho ${selectedAssignment.title}`}
-            onChange={(enrollmentId, value) =>
-              updateGrade(selectedAssignment.id, enrollmentId, value)
-            }
+            onChange={(enrollmentId, value) => {
+              setAssignmentGrades((current) => ({
+                ...current,
+                [assignmentGradeKey(selectedAssignment.id, enrollmentId)]:
+                  value,
+              }));
+              setFeedback(null);
+            }}
+          />
+          <ClassAverageNote
+            students={diary.students}
+            values={assignmentValues(selectedAssignment.id)}
+            maxGrade={selectedAssignment.maxGrade}
           />
           <Feedback feedback={feedback} tab="assignments" />
           <button
             type="button"
-            onClick={() =>
-              saveGrades(
-                "assignments",
-                selectedAssignment.id,
-                `Trabalho "${selectedAssignment.title}"`,
-                ASSIGNMENT_MAX_GRADE,
-              )
-            }
+            onClick={saveSelectedAssignment}
+            disabled={isPending}
             className={PRIMARY_BUTTON_CLASSES}
           >
             <span className="material-symbols-outlined" aria-hidden="true">
               check
             </span>
-            Salvar notas do trabalho
+            {isPending ? "Salvando…" : "Salvar notas do trabalho"}
           </button>
         </div>
       ) : (
         <>
           <Feedback feedback={feedback} tab="assignments" />
           <p className="text-center text-sm text-neutral-500">
-            Nenhum trabalho cadastrado para o {diary.className} ainda.
+            Nenhum trabalho cadastrado para o {diary.className} no {bimester}º
+            bimestre ainda.
           </p>
         </>
       )}
@@ -476,6 +598,26 @@ export function GradebookEditor({
             className={INPUT_CLASSES}
           />
         </div>
+        <div className="space-y-1">
+          <label htmlFor="attendance-lesson" className={LABEL_CLASSES}>
+            Aula
+          </label>
+          <select
+            id="attendance-lesson"
+            value={lessonNumber}
+            onChange={(event) => {
+              setLessonNumber(Number(event.target.value) as LessonNumber);
+              setFeedback(null);
+            }}
+            className={INPUT_CLASSES}
+          >
+            {LESSON_NUMBERS.map((item) => (
+              <option key={item} value={item}>
+                {item}ª
+              </option>
+            ))}
+          </select>
+        </div>
         <button
           type="button"
           onClick={markAllPresent}
@@ -496,13 +638,14 @@ export function GradebookEditor({
       <Feedback feedback={feedback} tab="attendance" />
       <button
         type="button"
-        onClick={saveAttendance}
+        onClick={submitAttendance}
+        disabled={isPending}
         className={PRIMARY_BUTTON_CLASSES}
       >
         <span className="material-symbols-outlined" aria-hidden="true">
           check
         </span>
-        Salvar chamada
+        {isPending ? "Salvando…" : "Salvar chamada"}
       </button>
     </div>
   );
@@ -536,6 +679,7 @@ export function GradebookEditor({
             value={bimester}
             onChange={(event) => {
               setBimester(Number(event.target.value) as Bimester);
+              setSelectedAssignmentId("");
               setFeedback(null);
             }}
             className={INPUT_CLASSES}

@@ -6,9 +6,14 @@ type SubjectGradeCardProps = {
   subject: string;
   /** Nome do ícone Material Symbols Outlined da disciplina. */
   icon: string;
-  /** Média de 0 a 10; a faixa (cor e rótulo) vem de `getGradeBand`. */
-  average: number;
+  /**
+   * Média de 0 a 10; a faixa (cor e rótulo) vem de `getGradeBand`. `null` quando
+   * a média ainda não foi lançada (ela entra como valor, não é calculada).
+   */
+  average: number | null;
   absences: number;
+  /** Detalhes abaixo da barra (ex.: notas por bimestre). */
+  children?: React.ReactNode;
 };
 
 /**
@@ -20,8 +25,9 @@ export function SubjectGradeCard({
   icon,
   average,
   absences,
+  children,
 }: SubjectGradeCardProps) {
-  const { label, textClassName } = getGradeBand(average);
+  const band = average === null ? null : getGradeBand(average);
 
   return (
     <Card className="space-y-3">
@@ -39,13 +45,24 @@ export function SubjectGradeCard({
             </p>
           </div>
         </div>
-        <div className={`text-right ${textClassName}`}>
-          <span className="sr-only">Média </span>
-          <span className="text-xl font-extrabold">{formatGrade(average)}</span>
-          <p className="text-xs font-bold">{label}</p>
-        </div>
+        {average !== null && band ? (
+          <div className={`text-right ${band.textClassName}`}>
+            <span className="sr-only">Média </span>
+            <span className="text-xl font-extrabold">
+              {formatGrade(average)}
+            </span>
+            <p className="text-xs font-bold">{band.label}</p>
+          </div>
+        ) : (
+          <p className="text-right text-xs text-neutral-500">
+            Média ainda não lançada
+          </p>
+        )}
       </div>
-      <GradeBar average={average} label={`Nota de ${subject}`} />
+      {average !== null && (
+        <GradeBar average={average} label={`Nota de ${subject}`} />
+      )}
+      {children}
     </Card>
   );
 }

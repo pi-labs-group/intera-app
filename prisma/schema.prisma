@@ -97,12 +97,30 @@ model StudentGuardian {
 
 // --- Estrutura acadêmica (Apêndice A) ---
 
+// No máximo um ano com `isCurrent` (índice parcial na migração). Os serviços
+// usam esse ano; sem nenhum marcado, recorrem ao ano civil de São Paulo.
 model SchoolYear {
-  id      Int           @id @default(autoincrement())
-  year    Int           @unique // 2026, 2027...
-  classes SchoolClass[]
+  id        Int            @id @default(autoincrement())
+  year      Int            @unique // 2026, 2027...
+  isCurrent Boolean        @default(false) @map("is_current")
+  classes   SchoolClass[]
+  periods   SchoolPeriod[]
 
   @@map("school_years")
+}
+
+// Calendário dos bimestres. Define o bimestre atual e as datas em que a chamada
+// pode ser registrada. Datas inclusivas.
+model SchoolPeriod {
+  id           Int        @id @default(autoincrement())
+  schoolYearId Int        @map("school_year_id")
+  schoolYear   SchoolYear @relation(fields: [schoolYearId], references: [id])
+  bimester     Int
+  startDate    DateTime   @map("start_date") @db.Date
+  endDate      DateTime   @map("end_date") @db.Date
+
+  @@unique([schoolYearId, bimester])
+  @@map("school_periods")
 }
 
 model SchoolClass {
@@ -113,6 +131,8 @@ model SchoolClass {
   name           String // letra da turma: "A", "B"...
   shift          String
   educationLevel String       @map("education_level") // "EF"/"EM" — inferência: EF = Ensino Fundamental (confirmar)
+  // Ordem de exibição; `gradeLevel` é texto e ordenaria "1ª série" antes de "8º".
+  sortOrder      Int          @default(0) @map("sort_order")
   enrollments    Enrollment[]
   diaries        Diary[]
 
@@ -120,8 +140,18 @@ model SchoolClass {
   @@map("school_classes")
 }
 
+enum EnrollmentStatus {
+  active
+  transferred
+  moved // remanejado para outra turma
+  dropped // abandono/evasão
+
+  @@map("enrollment_status")
+}
+
 // Vínculo aluno <-> turma. O nº de chamada mora aqui porque muda a cada
-// ano/turma; não é atributo do aluno.
+// ano/turma; não é atributo do aluno. Matrículas inativas continuam no banco
+// (histórico de notas), mas saem das listas e das médias da turma.
 model Enrollment {
   id               String            @id @default(uuid())
   studentId        String            @map("student_id")
@@ -129,7 +159,10 @@ model Enrollment {
   schoolClassId    String            @map("school_class_id")
   schoolClass      SchoolClass       @relation(fields: [schoolClassId], references: [id])
   callNumber       Int               @map("call_number")
+  status           EnrollmentStatus  @default(active)
+  leftAt           DateTime?         @map("left_at") @db.Date
   grades           Grade[]
+  assignmentGrades AssignmentGrade[]
   attendances      Attendance[]
   bimesterAverages BimesterAverage[]
   finalAverages    FinalAverage[]
@@ -197,29 +230,33 @@ model DiaryAssessment {
   assessmentType   AssessmentType @relation(fields: [assessmentTypeId], references: [id])
   order            Int?
   maxGrade         Decimal?       @map("max_grade") @db.Decimal(4, 2)
+  grades           Grade[]
 
   @@unique([diaryId, assessmentTypeId])
   @@map("diary_assessments")
 }
 
 // Formato longo: 1 linha por (matrícula, diário, bimestre, tipo de avaliação).
+// A relação com DiaryAssessment garante que só se lança nota de avaliação
+// declarada pelo diário; um trigger garante que a matrícula é da turma do diário.
 model Grade {
-  id               String         @id @default(uuid())
-  enrollmentId     String         @map("enrollment_id")
-  enrollment       Enrollment     @relation(fields: [enrollmentId], references: [id])
-  diaryId          String         @map("diary_id")
-  diary            Diary          @relation(fields: [diaryId], references: [id])
+  id               String          @id @default(uuid())
+  enrollmentId     String          @map("enrollment_id")
+  enrollment       Enrollment      @relation(fields: [enrollmentId], references: [id])
+  diaryId          String          @map("diary_id")
+  diary            Diary           @relation(fields: [diaryId], references: [id])
   bimester         Int
-  assessmentTypeId String         @map("assessment_type_id")
-  assessmentType   AssessmentType @relation(fields: [assessmentTypeId], references: [id])
-  value            Decimal        @db.Decimal(4, 2)
+  assessmentTypeId String          @map("assessment_type_id")
+  assessmentType   AssessmentType  @relation(fields: [assessmentTypeId], references: [id])
+  diaryAssessment  DiaryAssessment @relation(fields: [diaryId, assessmentTypeId], references: [diaryId, assessmentTypeId])
+  value            Decimal         @db.Decimal(4, 2)
 
   @@unique([enrollmentId, diaryId, bimester, assessmentTypeId])
   @@index([diaryId, bimester]) // lançamentos do professor: notas do diário no bimestre
   @@map("grades")
 }
 
-// 1 linha por dia de aula.
+// 1 linha por aula: dias com duas aulas da disciplina usam `lessonNumber` 1 e 2.
 model Attendance {
   id           String     @id @default(uuid())
   enrollmentId String     @map("enrollment_id")
@@ -227,10 +264,11 @@ model Attendance {
   diaryId      String     @map("diary_id")
   diary        Diary      @relation(fields: [diaryId], references: [id])
   date         DateTime   @db.Date
+  lessonNumber Int        @default(1) @map("lesson_number")
   present      Boolean
   compensated  Boolean    @default(false)
 
-  @@unique([enrollmentId, diaryId, date])
+  @@unique([enrollmentId, diaryId, date, lessonNumber])
   @@map("attendances")
 }
 
@@ -278,16 +316,34 @@ model SyllabusContent {
 
 // --- Rotina do app ---
 
-// Trabalho cadastrado pelo professor; a nota entra como avaliação do tipo TRAB.
+// Trabalho cadastrado pelo professor. A nota fica em AssignmentGrade; a
+// consolidação em TRAB está pendente (D3), pois os pesos não são conhecidos.
 model Assignment {
-  id          String   @id @default(uuid())
-  diaryId     String   @map("diary_id")
-  diary       Diary    @relation(fields: [diaryId], references: [id])
+  id          String            @id @default(uuid())
+  diaryId     String            @map("diary_id")
+  diary       Diary             @relation(fields: [diaryId], references: [id])
+  bimester    Int
   title       String
-  dueDate     DateTime @map("due_date") @db.Date
+  dueDate     DateTime          @map("due_date") @db.Date
   description String
+  maxGrade    Decimal           @default(10) @map("max_grade") @db.Decimal(4, 2)
+  grades      AssignmentGrade[]
 
   @@map("assignments")
+}
+
+// Nota de um aluno num trabalho. Um trigger garante que a matrícula é da turma
+// do diário do trabalho.
+model AssignmentGrade {
+  id           String     @id @default(uuid())
+  assignmentId String     @map("assignment_id")
+  assignment   Assignment @relation(fields: [assignmentId], references: [id])
+  enrollmentId String     @map("enrollment_id")
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id])
+  value        Decimal    @db.Decimal(4, 2)
+
+  @@unique([assignmentId, enrollmentId])
+  @@map("assignment_grades")
 }
 
 enum NoticePriority {

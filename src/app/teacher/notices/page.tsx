@@ -48,19 +48,25 @@ export default async function TeacherNoticesPage() {
         title="Avisos da matéria"
         subtitle="Publique comunicados para alunos e responsáveis das suas turmas."
       />
-      <NoticeComposer
-        diaries={diaries.map(({ id, subject, className }) => ({
-          id,
-          subject,
-          className,
-        }))}
-        author={`${teacher.displayName} (${teacher.subject})`}
-        initialNotices={PUBLISHED_NOTICES.map(({ className, ...notice }) => ({
-          ...notice,
-          diaryId:
-            diaries.find((diary) => diary.className === className)?.id ?? "",
-        }))}
-      />
+      {diaries.length > 0 ? (
+        <NoticeComposer
+          diaries={diaries.map(({ id, subject, className }) => ({
+            id,
+            subject,
+            className,
+          }))}
+          author={`${teacher.displayName} (${teacher.subject})`}
+          initialNotices={PUBLISHED_NOTICES.map(({ className, ...notice }) => ({
+            ...notice,
+            diaryId:
+              diaries.find((diary) => diary.className === className)?.id ?? "",
+          }))}
+        />
+      ) : (
+        <p className="text-center text-sm text-neutral-500">
+          Nenhum diário atribuído a você neste ano letivo.
+        </p>
+      )}
     </div>
   );
 }
