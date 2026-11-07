@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { MetricCard } from "@/components/ui/metric-card";
 import { SectionHeader } from "@/components/ui/section-header";
+import { getCurrentBimester } from "@/server/services/school-calendar-service";
 import {
   getCurrentTeacher,
   getTeacherDiaries,
@@ -34,9 +35,10 @@ const QUICK_ACTIONS = [
 ];
 
 export default async function TeacherHomePage() {
-  const [teacher, diaries] = await Promise.all([
+  const [teacher, diaries, currentBimester] = await Promise.all([
     getCurrentTeacher(),
     getTeacherDiaries(),
+    getCurrentBimester(),
   ]);
   const studentCount = diaries.reduce(
     (total, diary) => total + diary.students.length,
@@ -50,7 +52,7 @@ export default async function TeacherHomePage() {
           Olá, {teacher.displayName} 👋
         </h1>
         <p className="text-sm font-medium text-neutral-600">
-          Professor de {teacher.subject} · 4º bimestre
+          Professor de {teacher.subject} · {currentBimester}º bimestre
         </p>
       </div>
 

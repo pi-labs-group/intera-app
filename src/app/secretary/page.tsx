@@ -85,7 +85,7 @@ export default async function SecretaryPage() {
                 <AdminList>
                   {overview.classes.map((schoolClass) => (
                     <AdminRow
-                      key={schoolClass.name}
+                      key={schoolClass.id}
                       title={schoolClass.name}
                       detail={`${schoolClass.shift} · ${schoolClass.diaryCount} diários`}
                       value={`${schoolClass.studentCount} alunos`}

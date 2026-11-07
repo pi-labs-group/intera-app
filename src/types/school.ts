@@ -19,13 +19,18 @@ export type DiaryAssessment = {
   maxGrade: number;
 };
 
-/** Trabalho cadastrado pelo professor; a nota entra como avaliação do tipo TRAB. */
+/**
+ * Trabalho cadastrado pelo professor, com nota própria (AssignmentGrade). A
+ * consolidação das notas de trabalho na avaliação TRAB está pendente (D3).
+ */
 export type Assignment = {
   id: string;
+  bimester: Bimester;
   title: string;
   /** Data no formato ISO (AAAA-MM-DD). */
   dueDate: string;
   description: string;
+  maxGrade: number;
 };
 
 /** Diário de classe: turma + disciplina no ano letivo. */
@@ -41,6 +46,9 @@ export type Diary = {
 };
 
 export type Bimester = 1 | 2 | 3 | 4;
+
+/** Número da aula no dia (1 a 6): dias com duas aulas da disciplina têm 1 e 2. */
+export type LessonNumber = 1 | 2 | 3 | 4 | 5 | 6;
 
 export type Teacher = {
   name: string;

@@ -38,6 +38,15 @@ Scripts do banco:
 - `npm run db:deploy`: aplica migrations já existentes (ex.: criadas por outra pessoa),
   sem nunca resetar o banco.
 
+Testes:
+
+- `npm test`: testes unitários (Vitest), sem banco.
+- `npm run test:integration`: testes contra um Postgres **local e descartável**,
+  apontado por `TEST_DATABASE_URL` no `.env.local`. O setup aplica as migrations,
+  **apaga todas as tabelas** e roda o seed; por isso aborta se `TEST_DATABASE_URL` for
+  igual à `DATABASE_URL` ou se o host não for local (salvo `ALLOW_TEST_DB_RESET=1`).
+  Sem `TEST_DATABASE_URL`, os testes são pulados.
+
 ## Banco de dados
 
 O banco é o PostgreSQL do Supabase, o mesmo para todo o time:
@@ -53,8 +62,14 @@ O banco é o PostgreSQL do Supabase, o mesmo para todo o time:
 Todas as tabelas têm Row Level Security ligado e sem políticas: a Data API do
 Supabase (chave `anon`) não lê nada, e o Prisma, que conecta como dono das tabelas,
 não é afetado. Toda tabela nova precisa de `ENABLE ROW LEVEL SECURITY` na migration.
+Ver "Autorização e Row Level Security" em [docs/architecture.md](docs/architecture.md).
 
 Acesse [http://localhost:3000](http://localhost:3000).
+
+## Deploy
+
+O passo a passo para subir o banco no Supabase, aplicar as migrations e publicar na
+Vercel está em [docs/deploy-vercel.md](docs/deploy-vercel.md).
 
 ## Arquitetura
 

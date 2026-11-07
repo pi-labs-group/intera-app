@@ -31,7 +31,8 @@ export const MOCK_STUDENT = {
   name: "Lucas Andrade",
   firstName: "Lucas",
   className: "9º A",
-  enrollmentId: "20230045",
+  /** RA do aluno (Student.registrationNumber), não o id da matrícula. */
+  registrationNumber: "20230045",
   photoUrl:
     "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=300",
 };
